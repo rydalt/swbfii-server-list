@@ -1,0 +1,22 @@
+{
+    "name": "swbfii-server-list",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "build:client": "node scripts/bundle-client.mjs",
+        "dev": "npm run build:client && wrangler dev",
+        "deploy": "npm run build:client && wrangler deploy",
+        "lint": "eslint src/",
+        "typecheck": "tsc --noEmit && tsc --noEmit -p src/frontend/client/tsconfig.json"
+    },
+    "devDependencies": {
+        "@cloudflare/workers-types": "^4.20241205.0",
+        "@eslint/js": "^10.0.1",
+        "@typescript-eslint/eslint-plugin": "^8.58.0",
+        "@typescript-eslint/parser": "^8.58.0",
+        "esbuild": "^0.27.4",
+        "eslint": "^10.1.0",
+        "typescript": "^5.7.0",
+        "wrangler": "^4.78.0"
+    }
+}

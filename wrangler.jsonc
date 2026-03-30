@@ -1,0 +1,31 @@
+{
+	"name": "swbfii-server-list",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-03-30",
+	"workers_dev": true,
+	"preview_urls": true,
+	"triggers": {
+		"crons": [
+			"*/5 * * * *"
+		]
+	},
+	"kv_namespaces": [
+		{
+			"binding": "KV",
+			"id": "872be048ab7c4e69a1d482f6ad42bf33",
+			"preview_id": "b76445edd3ce4a16a8e8dfe0eb94e3ac"
+		}
+	],
+	"routes": [
+		{
+			"pattern": "swbf2.nullbits.io",
+			"zone_name": "nullbits.io",
+			"custom_domain": true
+		}
+	],
+	"observability": {
+		"logs": {
+			"enabled": true
+		}
+	}
+}
