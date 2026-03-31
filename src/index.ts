@@ -1,6 +1,7 @@
 import { getToken, type Env } from "./gog-auth";
 import { fetchServers, type ServerList } from "./matchmaking";
 import { HTML } from "./frontend/index";
+import { FAVICON_B64 } from "./favicon";
 
 const KV_SERVERS_KEY = "server_list";
 const KV_HISTORY_KEY = "history";
@@ -127,6 +128,13 @@ export default {
 
     if (url.pathname === "/health") {
       return new Response("ok", { headers: CORS_HEADERS });
+    }
+
+    if (url.pathname === "/favicon.ico") {
+      const buf = Uint8Array.from(atob(FAVICON_B64), c => c.charCodeAt(0));
+      return new Response(buf, {
+        headers: { "Content-Type": "image/x-icon", "Cache-Control": "public, max-age=604800" },
+      });
     }
 
     // Serve frontend at root
