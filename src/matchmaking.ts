@@ -235,7 +235,11 @@ export async function fetchServers(token: string, kv: KVNamespace): Promise<Serv
   if (rawCache) {
     try {
       const parsed: Record<string, CachedUser> = JSON.parse(rawCache);
-      cache = new Map(Object.entries(parsed));
+      for (const [id, entry] of Object.entries(parsed)) {
+        // Purge any previously cached unresolved Steam placeholders
+        if (entry.username.startsWith("Steam")) continue;
+        cache.set(id, entry);
+      }
     } catch { /* ignore corrupt cache */ }
   }
 
@@ -265,11 +269,13 @@ export async function fetchServers(token: string, kv: KVNamespace): Promise<Serv
   }
   const userMap = await resolveUsers(token, [...allIds], cache);
   const allMembers: Member[] = [];
+  const gogUsernames = new Map<string, string>(); // user_id → original GOG username
   const now = Math.floor(Date.now() / 1000);
   for (const s of servers) {
     for (const m of s.members) {
       const u = userMap.get(m.user_id);
       if (u) { m.username = u.username; m.avatar = u.avatar; }
+      gogUsernames.set(m.user_id, m.username);
       allMembers.push(m);
     }
   }
@@ -277,9 +283,13 @@ export async function fetchServers(token: string, kv: KVNamespace): Promise<Serv
   // Second pass: resolve Steam.{accountId} names to real Steam persona names (cached)
   await resolveSteamNames(allMembers, cache);
 
-  // Update cache with resolved data
+  // Update cache — only cache if username was resolved (changed from GOG placeholder, or was never a Steam user)
   for (const m of allMembers) {
-    if (m.username) {
+    if (!m.username) continue;
+    const original = gogUsernames.get(m.user_id) ?? "";
+    const wasUnresolved = original.startsWith("Steam");
+    const wasResolved = m.username !== original;
+    if (!wasUnresolved || wasResolved) {
       cache.set(m.user_id, {
         username: m.username,
         avatar: m.avatar,
