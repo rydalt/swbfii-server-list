@@ -42,6 +42,15 @@ export interface ServerList {
 
 const MATCHMAKING_URL = "https://multiplayer.gog.com/lobbies/matchmaking";
 const USERS_URL = "https://users.gog.com/users";
+const KV_USER_CACHE_KEY = "user_cache";
+const USER_CACHE_TTL = 86400; // 24h — re-resolve after this
+
+interface CachedUser {
+  username: string;
+  avatar: string;
+  steam_profile?: string;
+  t: number; // unix timestamp when cached
+}
 
 interface GogUser {
   id: string;
@@ -49,12 +58,24 @@ interface GogUser {
   avatar?: { sdk_img_32?: string };
 }
 
-async function resolveUsers(token: string, ids: string[]): Promise<Map<string, { username: string; avatar: string }>> {
+async function resolveUsers(token: string, ids: string[], cache: Map<string, CachedUser>): Promise<Map<string, { username: string; avatar: string }>> {
   const map = new Map<string, { username: string; avatar: string }>();
-  // Fetch in parallel, max 30 concurrent to avoid rate limits
+  const now = Math.floor(Date.now() / 1000);
+  const toResolve: string[] = [];
+
+  for (const id of ids) {
+    const cached = cache.get(id);
+    if (cached && (now - cached.t) < USER_CACHE_TTL) {
+      map.set(id, { username: cached.username, avatar: cached.avatar });
+    } else {
+      toResolve.push(id);
+    }
+  }
+
+  // Fetch only uncached/stale users, max 30 concurrent
   const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += 30) {
-    chunks.push(ids.slice(i, i + 30));
+  for (let i = 0; i < toResolve.length; i += 30) {
+    chunks.push(toResolve.slice(i, i + 30));
   }
   for (const chunk of chunks) {
     await Promise.allSettled(
@@ -64,10 +85,8 @@ async function resolveUsers(token: string, ids: string[]): Promise<Map<string, {
         });
         if (!resp.ok) return;
         const user: GogUser = await resp.json();
-        map.set(id, {
-          username: user.username ?? "",
-          avatar: user.avatar?.sdk_img_32 ?? "",
-        });
+        const entry = { username: user.username ?? "", avatar: user.avatar?.sdk_img_32 ?? "" };
+        map.set(id, entry);
       })
     );
   }
@@ -76,7 +95,7 @@ async function resolveUsers(token: string, ids: string[]): Promise<Map<string, {
 
 const STEAM_ID64_BASE = 76561197960265728n;
 
-async function resolveSteamNames(members: Member[]): Promise<void> {
+async function resolveSteamNames(members: Member[], cache: Map<string, CachedUser>): Promise<void> {
   // Steam players appear with two username patterns from the GOG users API:
   //  - "Steam.{accountId}"    — the number IS a Steam account ID, so we can compute
   //                             SteamID64 = accountId + 76561197960265728 and resolve
@@ -84,8 +103,18 @@ async function resolveSteamNames(members: Member[]): Promise<void> {
   //  - "SteamUser.{gogId}"    — the number is a GOG-internal user ID, NOT a Steam ID.
   //                             There's no public API to map GOG ID → Steam ID, so these
   //                             players are stuck showing the raw placeholder.
+  const now = Math.floor(Date.now() / 1000);
   const steamMembers: { member: Member; steamId64: string | null }[] = [];
   for (const m of members) {
+    // Check cache first (keyed by user_id)
+    const cached = cache.get(m.user_id);
+    if (cached && (now - cached.t) < USER_CACHE_TTL && cached.steam_profile) {
+      m.username = cached.username;
+      m.avatar = cached.avatar;
+      m.steam_profile = cached.steam_profile;
+      continue;
+    }
+
     const steamMatch = m.username.match(/^Steam\.(\d+)$/);
     if (steamMatch) {
       const id64 = (STEAM_ID64_BASE + BigInt(steamMatch[1])).toString();
@@ -199,7 +228,17 @@ function parseServer(lobby: RawLobby): ServerInfo {
   };
 }
 
-export async function fetchServers(token: string): Promise<ServerList> {
+export async function fetchServers(token: string, kv: KVNamespace): Promise<ServerList> {
+  // Load user cache from KV
+  let cache = new Map<string, CachedUser>();
+  const rawCache = await kv.get(KV_USER_CACHE_KEY);
+  if (rawCache) {
+    try {
+      const parsed: Record<string, CachedUser> = JSON.parse(rawCache);
+      cache = new Map(Object.entries(parsed));
+    } catch { /* ignore corrupt cache */ }
+  }
+
   const resp = await fetch(MATCHMAKING_URL, {
     method: "POST",
     headers: {
@@ -219,13 +258,14 @@ export async function fetchServers(token: string): Promise<ServerList> {
   const data: { items: RawLobby[] } = await resp.json();
   const servers = data.items.map(parseServer);
 
-  // Resolve unique user IDs to usernames
+  // Resolve unique user IDs to usernames (cached — only fetches new/stale)
   const allIds = new Set<string>();
   for (const s of servers) {
     for (const m of s.members) allIds.add(m.user_id);
   }
-  const userMap = await resolveUsers(token, [...allIds]);
+  const userMap = await resolveUsers(token, [...allIds], cache);
   const allMembers: Member[] = [];
+  const now = Math.floor(Date.now() / 1000);
   for (const s of servers) {
     for (const m of s.members) {
       const u = userMap.get(m.user_id);
@@ -234,8 +274,50 @@ export async function fetchServers(token: string): Promise<ServerList> {
     }
   }
 
-  // Second pass: resolve Steam.{accountId} names to real Steam persona names
-  await resolveSteamNames(allMembers);
+  // Second pass: resolve Steam.{accountId} names to real Steam persona names (cached)
+  await resolveSteamNames(allMembers, cache);
+
+  // Update cache with resolved data
+  for (const m of allMembers) {
+    if (m.username) {
+      cache.set(m.user_id, {
+        username: m.username,
+        avatar: m.avatar,
+        steam_profile: m.steam_profile,
+        t: now,
+      });
+    }
+  }
+
+  // Prune stale entries and enforce 1 MiB size cap
+  const activeIds = new Set(allMembers.map(m => m.user_id));
+  for (const [id, entry] of cache) {
+    if ((now - entry.t) > USER_CACHE_TTL * 2) cache.delete(id);
+  }
+
+  let cacheObj: Record<string, CachedUser> = Object.fromEntries(cache);
+  let json = JSON.stringify(cacheObj);
+  const MAX_CACHE_BYTES = 1024 * 1024; // 1 MiB
+
+  // If over limit, drop oldest absent users (not currently online) first
+  if (json.length > MAX_CACHE_BYTES) {
+    const entries = [...cache.entries()];
+    // Sort absent users by oldest timestamp first, keep active users at the end
+    entries.sort((a, b) => {
+      const aActive = activeIds.has(a[0]) ? 1 : 0;
+      const bActive = activeIds.has(b[0]) ? 1 : 0;
+      if (aActive !== bActive) return aActive - bActive;
+      return a[1].t - b[1].t;
+    });
+    // Drop from the front until under limit
+    while (entries.length > 0 && json.length > MAX_CACHE_BYTES) {
+      entries.shift();
+      cacheObj = Object.fromEntries(entries);
+      json = JSON.stringify(cacheObj);
+    }
+  }
+
+  await kv.put(KV_USER_CACHE_KEY, json, { expirationTtl: USER_CACHE_TTL * 2 });
 
   return {
     servers,

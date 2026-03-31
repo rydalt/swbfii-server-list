@@ -20,6 +20,18 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+/** Cap a record to the top N entries by value, truncate keys to maxLen. */
+function capRecord(rec: Record<string, number>, maxEntries: number, maxKeyLen: number): Record<string, number> {
+  const entries = Object.entries(rec)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxEntries);
+  const out: Record<string, number> = {};
+  for (const [k, v] of entries) {
+    out[k.slice(0, maxKeyLen)] = v;
+  }
+  return out;
+}
+
 /** Append a compact snapshot to the 7-day history ring in KV.
  *  Keeps 1-min granularity for last 24h, downsamples to 5-min for older data. */
 async function appendHistory(env: Env, list: ServerList): Promise<void> {
@@ -34,7 +46,11 @@ async function appendHistory(env: Env, list: ServerList): Promise<void> {
     modes[mode] = (modes[mode] ?? 0) + s.players;
   }
 
-  const snap: Snapshot = { t: now, p: players, s: list.total, maps, modes };
+  const snap: Snapshot = {
+    t: now, p: players, s: list.total,
+    maps: capRecord(maps, 30, 40),
+    modes: capRecord(modes, 10, 30),
+  };
 
   let history: Snapshot[] = [];
   const raw = await env.KV.get(KV_HISTORY_KEY);
@@ -80,13 +96,22 @@ async function appendHistory(env: Env, list: ServerList): Promise<void> {
     history = recent;
   }
 
-  await env.KV.put(KV_HISTORY_KEY, JSON.stringify(history), { expirationTtl: 691200 });
+  let json = JSON.stringify(history);
+  const MAX_HISTORY_BYTES = 20 * 1024 * 1024; // 20 MiB
+
+  // If over limit, drop oldest snapshots until under cap
+  while (history.length > 0 && json.length > MAX_HISTORY_BYTES) {
+    history.shift();
+    json = JSON.stringify(history);
+  }
+
+  await env.KV.put(KV_HISTORY_KEY, json, { expirationTtl: 691200 });
 }
 
 /** Refresh server list from GOG and store in KV. */
 async function refreshServers(env: Env): Promise<ServerList> {
   const token = await getToken(env);
-  const list = await fetchServers(token);
+  const list = await fetchServers(token, env.KV);
   await env.KV.put(KV_SERVERS_KEY, JSON.stringify(list), { expirationTtl: 300 });
   await appendHistory(env, list);
   return list;
