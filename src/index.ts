@@ -140,14 +140,14 @@ export default {
         }
       }
       return new Response(cached, {
-        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=60" },
       });
     }
 
     if (url.pathname === "/history") {
       const raw = await env.KV.get(KV_HISTORY_KEY);
       return new Response(raw || "[]", {
-        headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+        headers: { ...CORS_HEADERS, "Content-Type": "application/json", "Cache-Control": "public, max-age=300" },
       });
     }
 
