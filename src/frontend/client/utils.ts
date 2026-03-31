@@ -1,10 +1,14 @@
 import type { ClientServer, ClientMember } from "./types";
 
+function isSteamPlaceholder(name: string): boolean {
+  return name.startsWith("Steam.") || name.startsWith("SteamUser.") || name === "Steam Player";
+}
+
 export function hostHTML(members: ClientMember[]): string {
   const m = (members || []).find(m => m.username);
   if (!m || !m.username) return "\u2014";
   let profileUrl = m.steam_profile;
-  if (!profileUrl && !m.username.startsWith("Steam.")) {
+  if (!profileUrl && !isSteamPlaceholder(m.username)) {
     profileUrl = "https://www.gog.com/u/" + encodeURIComponent(m.username);
   }
   const nameHtml = profileUrl
@@ -100,7 +104,7 @@ export function detailHTML(s: ClientServer): string {
     html += '<div class="player-list"><div class="player-list-title">Players (' + members.length + ')</div>';
     html += members.map(m => {
       let profileUrl = m.steam_profile;
-      if (!profileUrl && m.username && !m.username.startsWith("Steam.")) {
+      if (!profileUrl && m.username && !isSteamPlaceholder(m.username)) {
         profileUrl = "https://www.gog.com/u/" + encodeURIComponent(m.username);
       }
       const nameHtml = profileUrl

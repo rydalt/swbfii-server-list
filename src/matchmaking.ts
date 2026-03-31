@@ -77,19 +77,31 @@ async function resolveUsers(token: string, ids: string[]): Promise<Map<string, {
 const STEAM_ID64_BASE = 76561197960265728n;
 
 async function resolveSteamNames(members: Member[]): Promise<void> {
-  // Find members with Steam.{accountId} usernames
-  const steamMembers: { member: Member; steamId64: string }[] = [];
+  // Steam players appear with two username patterns from the GOG users API:
+  //  - "Steam.{accountId}"    — the number IS a Steam account ID, so we can compute
+  //                             SteamID64 = accountId + 76561197960265728 and resolve
+  //                             their profile name/avatar via the Steam Community XML API.
+  //  - "SteamUser.{gogId}"    — the number is a GOG-internal user ID, NOT a Steam ID.
+  //                             There's no public API to map GOG ID → Steam ID, so these
+  //                             players are stuck showing the raw placeholder.
+  const steamMembers: { member: Member; steamId64: string | null }[] = [];
   for (const m of members) {
-    const match = m.username.match(/^Steam\.(\d+)$/);
-    if (match) {
-      const id64 = (STEAM_ID64_BASE + BigInt(match[1])).toString();
+    const steamMatch = m.username.match(/^Steam\.(\d+)$/);
+    if (steamMatch) {
+      const id64 = (STEAM_ID64_BASE + BigInt(steamMatch[1])).toString();
       steamMembers.push({ member: m, steamId64: id64 });
+    } else if (/^SteamUser\.\d+$/.test(m.username)) {
+      // GOG user ID — can't derive Steam ID, leave username as-is
+      steamMembers.push({ member: m, steamId64: null });
     }
   }
   if (steamMembers.length === 0) return;
 
   await Promise.allSettled(
     steamMembers.map(async ({ member, steamId64 }) => {
+      if (!steamId64) return;
+      // Always set the profile link even if name resolution fails
+      member.steam_profile = `https://steamcommunity.com/profiles/${steamId64}`;
       try {
         const resp = await fetch(
           `https://steamcommunity.com/profiles/${steamId64}/?xml=1`,
@@ -100,7 +112,6 @@ async function resolveSteamNames(members: Member[]): Promise<void> {
         const nameMatch = xml.match(/steamID><!\[CDATA\[(.+?)\]\]/);
         if (nameMatch) {
           member.username = nameMatch[1];
-          member.steam_profile = `https://steamcommunity.com/profiles/${steamId64}`;
           member.avatar = "";
           const avatarMatch = xml.match(/avatarMedium><!\[CDATA\[(.+?)\]\]/);
           if (avatarMatch) member.avatar = avatarMatch[1];
