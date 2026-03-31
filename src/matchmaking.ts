@@ -235,11 +235,7 @@ export async function fetchServers(token: string, kv: KVNamespace): Promise<Serv
   if (rawCache) {
     try {
       const parsed: Record<string, CachedUser> = JSON.parse(rawCache);
-      for (const [id, entry] of Object.entries(parsed)) {
-        // Purge any previously cached unresolved Steam placeholders
-        if (entry.username.startsWith("Steam")) continue;
-        cache.set(id, entry);
-      }
+      cache = new Map(Object.entries(parsed));
     } catch { /* ignore corrupt cache */ }
   }
 
