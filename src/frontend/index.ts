@@ -9,6 +9,12 @@ export const HTML = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SWBF2 Server Browser</title>
+<meta name="description" content="Live server browser for Star Wars Battlefront II (2005)">
+<meta property="og:title" content="SWBF2 Server Browser">
+<meta property="og:description" content="Live server browser for Star Wars Battlefront II (2005) — real-time player counts, maps, modes, and historical charts.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://swbf2.nullbits.io">
+<meta name="twitter:card" content="summary">
 <link rel="icon" type="image/x-icon" href="data:image/x-icon;base64,${FAVICON_B64}">
 <style>${STYLES}</style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>

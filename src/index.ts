@@ -140,7 +140,7 @@ export default {
     // Serve frontend at root
     if (url.pathname === "/" || url.pathname === "/index.html") {
       return new Response(HTML, {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" },
       });
     }
 
